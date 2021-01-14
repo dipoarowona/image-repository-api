@@ -4,6 +4,27 @@ const Image = require("../models/image");
 const auth = require("../middleware/auth");
 const upload = require("../middleware/upload");
 const router = express.Router();
+const crypto = require("crypto");
+
+const decrypt = (encrypted) => {
+  // Get the iv: the first 16 bytes
+  const iv = encrypted.slice(0, 16);
+
+  // Get the rest
+  encrypted = encrypted.slice(16);
+
+  const key = crypto
+    .createHash("sha256")
+    .update(String(process.env.IMAGE_ENCRPT))
+    .digest("base64")
+    .substr(0, 32);
+
+  // Create a decipher
+  const decipher = crypto.createDecipheriv("aes-256-ctr", key, iv);
+  // Actually decrypt it
+  const result = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  return result;
+};
 
 //upload one
 router.post(
@@ -63,15 +84,16 @@ router.post(
   }
 );
 
-//get image using id of image
-router.get("/image/:id", auth, async (req, res) => {
+//get all of users images (paginated)
+router.get("/image/mine", auth, async (req, res) => {
   try {
-    const image = await Image.findOne({
-      _id: req.params.id,
-      owner: req.user._id,
-    });
+    await req.user
+      .populate({ path: "images", options: { skip: parseInt(req.query.skip) } })
+      .execPopulate();
     res.set("Content-Type", "image/png");
-    res.send(image.image);
+    res.set("Description", req.user.images[0].description);
+    res.set("image-ID", req.user.images[0]._id);
+    res.send(decrypt(req.user.images[0].image));
   } catch (err) {
     res.status(404).send();
   }
@@ -91,22 +113,21 @@ router.get("/image/search", auth, async (req, res) => {
     res.set("Content-Type", "image/png");
     res.set("Description", images[0].description);
     res.set("image-ID", images[0]._id);
-    res.send(images[0].image);
+    res.send(decrypt(images[0].image));
   } catch (err) {
     res.status(404).send();
   }
 });
 
-//get all of users images (paginated)
-router.get("/image/mine", auth, async (req, res) => {
+//get image using id of image
+router.get("/image/:id", auth, async (req, res) => {
   try {
-    await req.user
-      .populate({ path: "images", options: { skip: parseInt(req.query.skip) } })
-      .execPopulate();
+    const image = await Image.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+    });
     res.set("Content-Type", "image/png");
-    res.set("Description", req.user.images[0].description);
-    res.set("image-ID", req.user.images[0]._id);
-    res.send(req.user.images[0].image);
+    res.send(decrypt(image.image));
   } catch (err) {
     res.status(404).send();
   }
